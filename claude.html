@@ -110,6 +110,26 @@ textarea,.txt{width:100%;padding:12px 14px;border-radius:10px;border:1px solid v
 .win b{font-family:var(--display);font-size:22px}
 .suggest{padding:16px;border-radius:12px;background:var(--pink-soft);border:2px solid var(--pink);display:flex;flex-direction:column;gap:8px}
 .suggest .cap{color:var(--pink-dark)}
+.statbtn{text-align:left;border:1px solid var(--input-border);color:var(--ink);font:inherit}
+.statbtn:hover,.statbtn[aria-expanded="true"]{border-color:var(--pink);background:var(--pink-soft)!important}
+.statbtn .more{font-size:12px;font-weight:600;color:var(--pink-dark)}
+button.bar-row{width:100%;background:none;border:none;padding:2px 0;color:var(--ink);text-align:left;border-radius:6px}
+button.bar-row:hover .name{color:var(--pink-dark);text-decoration:underline}
+.readout{font-size:13px;color:var(--ink-2);min-height:1.5em;font-variant-numeric:tabular-nums}
+.readout b{color:var(--ink)}
+.chart{display:flex;gap:4px;height:150px}
+.day{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:4px;background:none;border:none;padding:0;color:var(--ink)}
+.day .area{flex:1 1 auto;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:2px;border-bottom:1px solid var(--border)}
+.day .b{width:100%;max-width:26px;min-height:2px;border-radius:4px 4px 0 0;background:var(--pink);opacity:.75}
+.day .v{font-size:11px;font-weight:600;color:var(--ink-2);font-variant-numeric:tabular-nums;visibility:hidden}
+.day.last .b,.day:hover .b,.day:focus-visible .b,.day.on .b{opacity:1}
+.day.last .v,.day:hover .v,.day:focus-visible .v,.day.on .v{visibility:visible}
+.day .dl{font-size:10px;color:var(--muted);text-align:center;white-space:nowrap;overflow:hidden}
+.filters{display:flex;flex-wrap:wrap;gap:6px}
+.filters .chip[aria-pressed="true"]{background:var(--pink);border-color:var(--pink);color:var(--on-pink)}
+.daygrp{display:flex;flex-direction:column;gap:8px}
+.daygrp h4{margin:0;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+.allbox{display:flex;flex-direction:column;gap:14px;border-top:1px solid var(--line);padding-top:14px;max-height:520px;overflow:auto}
 .suggest .txt-a{white-space:pre-wrap;font-size:16px}
 .suggest ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px;font-size:14px;color:var(--ink-2)}
 @media (prefers-reduced-motion:reduce){.gamebar .prog div{transition:none}}
@@ -173,8 +193,18 @@ textarea,.txt{width:100%;padding:12px 14px;border-radius:10px;border:1px solid v
         <div id="memBody" hidden style="display:flex;flex-direction:column;gap:16px">
           <div class="mini">
             <div class="stat"><div class="cap">Checks</div><div class="score" id="mChecks"></div></div>
-            <div class="stat"><div class="cap">Mistakes</div><div class="score" id="mMistakes"></div></div>
+            <button class="stat statbtn" id="mMistakesBtn" type="button" aria-expanded="false" aria-controls="allBox"><div class="cap">Mistakes</div><div class="score" id="mMistakes"></div><div class="more" id="mMore">See all &#9662;</div></button>
             <div class="stat"><div class="cap">Avg score</div><div class="score" id="mAvg"></div></div>
+          </div>
+          <div class="allbox" id="allBox" hidden>
+            <div class="filters" id="mFilters"></div>
+            <div id="mAll" style="display:flex;flex-direction:column;gap:14px"></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div class="cap">Mistakes per answer, by day</div>
+            <div class="readout" id="mReadout"></div>
+            <div class="chart" id="mChart" role="img" aria-label="Mistakes per answer for each day you practiced"></div>
+            <p class="muted" id="mTrend" style="font-size:13px"></p>
           </div>
           <div style="display:flex;flex-direction:column;gap:8px">
             <div class="cap">By type</div>
@@ -280,7 +310,9 @@ function errorText(e) {
 // ---- Memory: each grammar check is saved privately for the viewer ----
 const MISTAKE_TYPES = ['Verb tense', 'Articles', 'Prepositions', 'Word order', 'Word choice', 'Subject-verb agreement', 'Singular/plural', 'Spelling', 'Punctuation', 'Natural phrasing'];
 const normType = (t) => MISTAKE_TYPES.find(x => x.toLowerCase() === String(t || '').trim().toLowerCase()) || 'Other';
-const mem = { col: null, checks: [] };
+const mem = { col: null, checks: [], filter: 'All' };
+const dayKey = (t) => { const d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+const dayLabel = (k, long) => new Date(k + 'T12:00:00').toLocaleDateString('en-US', long ? { weekday: 'short', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' });
 
 (async () => {
   const db = window.claude ? await window.claude.use('db').catch(() => null) : null;
@@ -328,7 +360,9 @@ function renderMemory() {
   const bars = $('mBars'); bars.innerHTML = '';
   if (!types.length) bars.innerHTML = '<p class="muted">No mistakes found yet. Great work!</p>';
   types.forEach(([name, n]) => {
-    const row = document.createElement('div'); row.className = 'bar-row';
+    const row = document.createElement('button'); row.type = 'button'; row.className = 'bar-row';
+    row.title = 'See all ' + name + ' mistakes';
+    row.onclick = () => { mem.filter = name; openAll(true); };
     const l = document.createElement('span'); l.className = 'name'; l.textContent = name;
     const t = document.createElement('div'); t.className = 'bar-track';
     const f = document.createElement('div'); f.className = 'bar-fill'; f.style.width = (n / max * 100) + '%'; t.appendChild(f);
@@ -355,6 +389,99 @@ function renderMemory() {
     const x = document.createElement('span'); x.className = 'x';
     x.textContent = m.type + (m.n > 1 ? ' · ' + m.n + ' times' : '') + (m.why ? ' · ' + m.why : '');
     li.append(top, x); ul.appendChild(li);
+  });
+
+  renderChart(checks);
+  if (!$('allBox').hidden) renderAll();
+}
+
+// One bar per practice day (last 14): mistakes divided by answers checked that day
+function renderChart(checks) {
+  const days = {};
+  checks.forEach(c => {
+    const k = dayKey(c.at);
+    const d = days[k] = days[k] || { checks: 0, mistakes: 0 };
+    d.checks++; d.mistakes += (c.mistakes || []).length;
+  });
+  const keys = Object.keys(days).sort().slice(-14);
+  const rate = (k) => days[k].mistakes / days[k].checks;
+  const max = Math.max(1, ...keys.map(rate));
+  const chart = $('mChart'); chart.innerHTML = '';
+  const readout = (k) => {
+    const d = days[k];
+    $('mReadout').innerHTML = '';
+    const b = document.createElement('b'); b.textContent = dayLabel(k, true);
+    $('mReadout').append(b, ': ' + rate(k).toFixed(1) + ' mistakes per answer (' + d.mistakes + ' in ' + d.checks + (d.checks === 1 ? ' answer)' : ' answers)'));
+  };
+  keys.forEach((k, i) => {
+    const col = document.createElement('button'); col.type = 'button';
+    col.className = 'day' + (i === keys.length - 1 ? ' last' : '');
+    col.setAttribute('aria-label', dayLabel(k, true) + ', ' + rate(k).toFixed(1) + ' mistakes per answer');
+    const area = document.createElement('div'); area.className = 'area';
+    const v = document.createElement('span'); v.className = 'v'; v.textContent = rate(k).toFixed(1);
+    const bar = document.createElement('div'); bar.className = 'b'; bar.style.height = (rate(k) / max * 100) + '%';
+    area.append(v, bar);
+    const dl = document.createElement('span'); dl.className = 'dl'; dl.textContent = dayLabel(k);
+    col.append(area, dl);
+    col.onmouseenter = col.onfocus = () => readout(k);
+    col.onmouseleave = col.onblur = () => readout(keys[keys.length - 1]);
+    chart.appendChild(col);
+  });
+  if (keys.length) readout(keys[keys.length - 1]);
+
+  const trend = $('mTrend');
+  if (keys.length < 2) { trend.textContent = 'Practice on another day and you will see if your mistakes go down.'; return; }
+  const now = rate(keys[keys.length - 1]), before = rate(keys[keys.length - 2]);
+  const diff = Math.abs(now - before).toFixed(1);
+  trend.textContent = now < before ? 'Great! ' + diff + ' fewer mistakes per answer than on ' + dayLabel(keys[keys.length - 2]) + '.'
+    : now > before ? diff + ' more mistakes per answer than on ' + dayLabel(keys[keys.length - 2]) + '. Review your repeated mistakes above.'
+    : 'Same as on ' + dayLabel(keys[keys.length - 2]) + '. Keep going!';
+}
+
+// Full list of every saved mistake, grouped by day, filterable by type
+function openAll(show) {
+  $('allBox').hidden = !show;
+  $('mMistakesBtn').setAttribute('aria-expanded', String(show));
+  $('mMore').innerHTML = show ? 'Hide &#9652;' : 'See all &#9662;';
+  if (show) { renderAll(); $('allBox').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+}
+$('mMistakesBtn').onclick = () => { if ($('allBox').hidden) mem.filter = 'All'; openAll($('allBox').hidden); };
+
+function renderAll() {
+  const all = mem.checks.flatMap(c => (c.mistakes || []).map(m => ({ ...m, at: c.at, question: c.question })));
+  const present = ['All', ...MISTAKE_TYPES.concat('Other').filter(t => all.some(m => m.type === t))];
+  if (!present.includes(mem.filter)) mem.filter = 'All';
+  const f = $('mFilters'); f.innerHTML = '';
+  present.forEach(t => {
+    const c = document.createElement('button'); c.type = 'button'; c.className = 'chip';
+    const n = t === 'All' ? all.length : all.filter(m => m.type === t).length;
+    c.textContent = t + ' (' + n + ')';
+    c.setAttribute('aria-pressed', String(t === mem.filter));
+    c.onclick = () => { mem.filter = t; renderAll(); };
+    f.appendChild(c);
+  });
+  const list = all.filter(m => mem.filter === 'All' || m.type === mem.filter);
+  const box = $('mAll'); box.innerHTML = '';
+  if (!list.length) { box.innerHTML = '<p class="muted">No mistakes here yet.</p>'; return; }
+  const groups = {};
+  list.forEach(m => { (groups[dayKey(m.at)] = groups[dayKey(m.at)] || []).push(m); });
+  Object.keys(groups).sort().reverse().forEach(k => {
+    const g = document.createElement('div'); g.className = 'daygrp';
+    const h = document.createElement('h4'); h.textContent = dayLabel(k, true) + ' · ' + groups[k].length;
+    const ul = document.createElement('ul'); ul.className = 'rep';
+    groups[k].forEach(m => {
+      const li = document.createElement('li');
+      const top = document.createElement('div');
+      const s = document.createElement('s'); s.textContent = m.from;
+      const b = document.createElement('b'); b.textContent = m.to;
+      top.append(s, ' to ', b);
+      const x = document.createElement('span'); x.className = 'x';
+      x.textContent = m.type + (m.why ? ' · ' + m.why : '');
+      li.append(top, x);
+      if (m.question) { const q = document.createElement('span'); q.className = 'x'; q.style.fontStyle = 'italic'; q.textContent = 'Q: ' + m.question; li.appendChild(q); }
+      ul.appendChild(li);
+    });
+    g.append(h, ul); box.appendChild(g);
   });
 }
 
